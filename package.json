@@ -1,5 +1,5 @@
 {
-  "name": "frameworker",
+  "name": "framewebworker",
   "version": "0.1.0",
   "description": "Browser-native video rendering and clip export library. Trim, caption, and export MP4 Blobs in the browser — no server needed.",
   "keywords": [
