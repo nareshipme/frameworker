@@ -17,6 +17,22 @@ export default defineConfig([
     },
   },
   {
+    // render.ts as a standalone entry so dist/render.js exists for the react bundle to import.
+    // No DTS here — all public types are declared through the main index entry above.
+    entry: {
+      render: 'src/render.ts',
+    },
+    format: ['esm', 'cjs'],
+    dts: false,
+    sourcemap: true,
+    splitting: false,
+    treeshake: true,
+    external: ['@ffmpeg/ffmpeg', '@ffmpeg/util', 'react', 'react-dom'],
+    esbuildOptions(options) {
+      options.conditions = ['browser'];
+    },
+  },
+  {
     entry: {
       'react/index': 'src/react/index.ts',
     },

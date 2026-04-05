@@ -69,7 +69,7 @@ export class WorkerPool {
 
   constructor(maxConcurrency: number) {
     for (let i = 0; i < maxConcurrency; i++) {
-      const w = new Worker(new URL('./render-worker.js', import.meta.url), { type: 'module' });
+      const w = new Worker(new URL('./worker/render-worker.js', import.meta.url), { type: 'module' });
       this.workers.push(w);
       this.available.push(w);
     }
