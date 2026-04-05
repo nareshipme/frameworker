@@ -1,4 +1,4 @@
-import type { ClipInput, RendererBackend, FrameData, ClipProgress, StitchOptions } from './types.js';
+import type { ClipInput, RendererBackend, FrameData, ClipProgress, StitchOptions, ClipMetrics, RenderMetrics } from './types.js';
 import { extractFrames } from './compositor.js';
 import { WorkerPool } from './worker/pool.js';
 
@@ -14,7 +14,7 @@ export async function stitchClips(
   clips: ClipInput[],
   backend: RendererBackend,
   options: StitchOptions
-): Promise<Blob> {
+): Promise<{ blob: Blob; metrics: RenderMetrics }> {
   if (supportsOffscreenWorkers() && clips.length > 1) {
     return stitchParallel(clips, backend, options);
   }
@@ -27,15 +27,18 @@ async function stitchSequential(
   clips: ClipInput[],
   backend: RendererBackend,
   options: StitchOptions
-): Promise<Blob> {
+): Promise<{ blob: Blob; metrics: RenderMetrics }> {
   const fps = options.fps ?? 30;
   const width = options.width ?? 1280;
   const height = options.height ?? 720;
-  const { onProgress, signal } = options;
+  const { onProgress, onComplete, signal } = options;
+
+  const stitchStart = performance.now();
 
   const clipStatuses: ClipProgress[] = clips.map((_, i) => ({
     index: i, status: 'pending', progress: 0,
   }));
+  const clipMetrics: ClipMetrics[] = [];
 
   const emit = (overall: number) => {
     onProgress?.({ overall, clips: clipStatuses.slice() });
@@ -47,6 +50,7 @@ async function stitchSequential(
     clipStatuses[ci].status = 'rendering';
     emit(ci / clips.length);
 
+    const extractStart = performance.now();
     const frames = await extractFrames(clips[ci], {
       fps, width, height,
       mimeType: options.mimeType,
@@ -58,8 +62,10 @@ async function stitchSequential(
         emit((ci + p * 0.9) / clips.length);
       },
     });
+    const extractionMs = performance.now() - extractStart;
 
     clipStatuses[ci].status = 'encoding';
+    const encodeStart = performance.now();
     const blob = await backend.encode(frames, {
       width, height, fps,
       mimeType: options.mimeType ?? 'video/mp4',
@@ -71,21 +77,51 @@ async function stitchSequential(
         emit((ci + 0.9 + p * 0.1) / clips.length);
       },
     });
+    const encodingMs = performance.now() - encodeStart;
 
     clipStatuses[ci].status = 'done';
     clipStatuses[ci].progress = 1;
+    clipMetrics.push({
+      clipId: String(ci),
+      extractionMs,
+      encodingMs,
+      totalMs: extractionMs + encodingMs,
+      framesExtracted: frames.length,
+    });
     blobs.push(blob);
   }
 
-  if (blobs.length === 1) { emit(1); return blobs[0]; }
+  let finalBlob: Blob;
+  let stitchMs = 0;
 
-  return backend.concat(blobs, {
-    width, height, fps,
-    mimeType: options.mimeType ?? 'video/mp4',
-    quality: options.quality ?? 0.92,
-    signal,
-    onProgress: (p) => emit((clips.length - 1 + p) / clips.length),
-  });
+  if (blobs.length === 1) {
+    emit(1);
+    finalBlob = blobs[0];
+  } else {
+    const stitchPhaseStart = performance.now();
+    finalBlob = await backend.concat(blobs, {
+      width, height, fps,
+      mimeType: options.mimeType ?? 'video/mp4',
+      quality: options.quality ?? 0.92,
+      signal,
+      onProgress: (p) => emit((clips.length - 1 + p) / clips.length),
+    });
+    stitchMs = performance.now() - stitchPhaseStart;
+  }
+
+  const totalMs = performance.now() - stitchStart;
+  const totalFrames = clipMetrics.reduce((s, c) => s + c.framesExtracted, 0);
+  const metrics: RenderMetrics = {
+    totalMs,
+    extractionMs: clipMetrics.reduce((s, c) => s + c.extractionMs, 0),
+    encodingMs: clipMetrics.reduce((s, c) => s + c.encodingMs, 0),
+    stitchMs,
+    clips: clipMetrics,
+    framesPerSecond: totalFrames / (totalMs / 1000),
+  };
+
+  onComplete?.(metrics);
+  return { blob: finalBlob, metrics };
 }
 
 // ── Parallel path (OffscreenCanvas + WorkerPool) ──────────────────────────────
@@ -94,11 +130,13 @@ async function stitchParallel(
   clips: ClipInput[],
   backend: RendererBackend,
   options: StitchOptions
-): Promise<Blob> {
+): Promise<{ blob: Blob; metrics: RenderMetrics }> {
   const fps = options.fps ?? 30;
   const width = options.width ?? 1280;
   const height = options.height ?? 720;
-  const { onProgress, signal } = options;
+  const { onProgress, onComplete, signal } = options;
+
+  const stitchStart = performance.now();
 
   const concurrency = Math.min(
     clips.length,
@@ -109,6 +147,7 @@ async function stitchParallel(
   const clipStatuses: ClipProgress[] = clips.map((_, i) => ({
     index: i, status: 'pending', progress: 0,
   }));
+  const clipMetrics: Array<ClipMetrics> = new Array(clips.length);
 
   const emit = () => {
     const overall = clipStatuses.reduce((sum, c) => sum + c.progress, 0) / clips.length;
@@ -116,11 +155,7 @@ async function stitchParallel(
   };
 
   const pool = new WorkerPool(concurrency);
-
-  // blobs[ci] filled as soon as clip ci finishes encoding
   const blobs: Blob[] = new Array(clips.length);
-
-  // ffmpeg.wasm is single-instance — serialise encoding while extraction runs in parallel
   let encodeChain = Promise.resolve();
 
   try {
@@ -129,6 +164,7 @@ async function stitchParallel(
         clipStatuses[ci].status = 'rendering';
         emit();
 
+        const extractStart = performance.now();
         const frames: FrameData[] = await pool.dispatch(
           clip, width, height, fps, signal,
           (p) => {
@@ -136,14 +172,15 @@ async function stitchParallel(
             emit();
           }
         );
+        const extractionMs = performance.now() - extractStart;
 
         clipStatuses[ci].status = 'encoding';
         clipStatuses[ci].progress = 0.85;
         emit();
 
-        // Queue behind any in-progress encode; await until THIS clip's encode completes
         await new Promise<void>((resolve, reject) => {
           encodeChain = encodeChain.then(async () => {
+            const encodeStart = performance.now();
             try {
               blobs[ci] = await backend.encode(frames, {
                 width, height, fps,
@@ -156,6 +193,14 @@ async function stitchParallel(
                   emit();
                 },
               });
+              const encodingMs = performance.now() - encodeStart;
+              clipMetrics[ci] = {
+                clipId: String(ci),
+                extractionMs,
+                encodingMs,
+                totalMs: extractionMs + encodingMs,
+                framesExtracted: frames.length,
+              };
               clipStatuses[ci].status = 'done';
               clipStatuses[ci].progress = 1;
               emit();
@@ -170,17 +215,36 @@ async function stitchParallel(
       })
     );
 
+    let finalBlob: Blob;
+    let stitchMs = 0;
+
     if (blobs.length === 1) {
       onProgress?.({ overall: 1, clips: clipStatuses.slice() });
-      return blobs[0];
+      finalBlob = blobs[0];
+    } else {
+      const stitchPhaseStart = performance.now();
+      finalBlob = await backend.concat(blobs, {
+        width, height, fps,
+        mimeType: options.mimeType ?? 'video/mp4',
+        quality: options.quality ?? 0.92,
+        signal,
+      });
+      stitchMs = performance.now() - stitchPhaseStart;
     }
 
-    return backend.concat(blobs, {
-      width, height, fps,
-      mimeType: options.mimeType ?? 'video/mp4',
-      quality: options.quality ?? 0.92,
-      signal,
-    });
+    const totalMs = performance.now() - stitchStart;
+    const totalFrames = clipMetrics.reduce((s, c) => s + c.framesExtracted, 0);
+    const metrics: RenderMetrics = {
+      totalMs,
+      extractionMs: clipMetrics.reduce((s, c) => s + c.extractionMs, 0),
+      encodingMs: clipMetrics.reduce((s, c) => s + c.encodingMs, 0),
+      stitchMs,
+      clips: clipMetrics,
+      framesPerSecond: totalFrames / (totalMs / 1000),
+    };
+
+    onComplete?.(metrics);
+    return { blob: finalBlob, metrics };
   } finally {
     pool.terminate();
   }

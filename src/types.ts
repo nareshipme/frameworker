@@ -126,6 +126,23 @@ export interface FrameWorkerConfig {
   height?: number;
 }
 
+export interface ClipMetrics {
+  clipId: string;
+  extractionMs: number;   // worker frame extraction phase
+  encodingMs: number;     // ffmpeg encoding phase
+  totalMs: number;        // extractionMs + encodingMs
+  framesExtracted: number;
+}
+
+export interface RenderMetrics {
+  totalMs: number;           // wall-clock: stitch() call → final blob
+  extractionMs: number;      // sum of all clip extraction times
+  encodingMs: number;        // sum of all clip encoding times
+  stitchMs: number;          // final ffmpeg concat phase
+  clips: ClipMetrics[];
+  framesPerSecond: number;   // total frames / (totalMs / 1000)
+}
+
 export type ClipStatus = 'pending' | 'rendering' | 'encoding' | 'done' | 'error';
 
 export interface ClipProgress {
@@ -139,9 +156,10 @@ export interface RichProgress {
   clips: ClipProgress[];
 }
 
-/** Extends RenderOptions with rich per-clip progress reporting */
+/** Extends RenderOptions with rich per-clip progress reporting and completion metrics */
 export interface StitchOptions extends Omit<RenderOptions, 'onProgress'> {
   onProgress?: (progress: RichProgress) => void;
+  onComplete?: (metrics: RenderMetrics) => void;
 }
 
 export interface FrameWorker {
@@ -150,7 +168,7 @@ export interface FrameWorker {
   /** Render a single clip and return an object URL */
   renderToUrl(clip: ClipInput, options?: RenderOptions): Promise<string>;
   /** Stitch multiple clips into one Blob */
-  stitch(clips: ClipInput[], options?: StitchOptions): Promise<Blob>;
+  stitch(clips: ClipInput[], options?: StitchOptions): Promise<{ blob: Blob; metrics: RenderMetrics }>;
   /** Stitch multiple clips and return an object URL */
-  stitchToUrl(clips: ClipInput[], options?: StitchOptions): Promise<string>;
+  stitchToUrl(clips: ClipInput[], options?: StitchOptions): Promise<{ url: string; metrics: RenderMetrics }>;
 }

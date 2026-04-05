@@ -16,12 +16,14 @@ export type {
   ClipProgress,
   RichProgress,
   StitchOptions,
+  ClipMetrics,
+  RenderMetrics,
 } from './types.js';
 
 export { STYLE_PRESETS } from './captions.js';
 export { FFmpegBackend, createFFmpegBackend } from './backends/ffmpeg.js';
 
-import type { ClipInput, RenderOptions, StitchOptions, FrameWorkerConfig, FrameWorker, RendererBackend } from './types.js';
+import type { ClipInput, RenderOptions, StitchOptions, RenderMetrics, FrameWorkerConfig, FrameWorker, RendererBackend } from './types.js';
 import { extractFrames } from './compositor.js';
 import { stitchClips } from './stitch.js';
 
@@ -68,15 +70,15 @@ export function createFrameWorker(config: FrameWorkerConfig = {}): FrameWorker {
     return URL.createObjectURL(blob);
   }
 
-  async function stitch(clips: ClipInput[], options: StitchOptions = {}): Promise<Blob> {
+  async function stitch(clips: ClipInput[], options: StitchOptions = {}): Promise<{ blob: Blob; metrics: RenderMetrics }> {
     const mergedOpts: StitchOptions = { fps, width, height, ...options };
     const backend = await getBackend();
     return stitchClips(clips, backend, mergedOpts);
   }
 
-  async function stitchToUrl(clips: ClipInput[], options?: StitchOptions): Promise<string> {
-    const blob = await stitch(clips, options);
-    return URL.createObjectURL(blob);
+  async function stitchToUrl(clips: ClipInput[], options?: StitchOptions): Promise<{ url: string; metrics: RenderMetrics }> {
+    const { blob, metrics } = await stitch(clips, options);
+    return { url: URL.createObjectURL(blob), metrics };
   }
 
   return { render, renderToUrl, stitch, stitchToUrl };
