@@ -41,6 +41,66 @@ Both produce a single concatenated MP4 `Blob` and return `RenderMetrics`.
 
 ---
 
+## Performance
+
+### What affects render time
+
+| Factor | Impact |
+|--------|--------|
+| Source resolution | 1080p takes ~2–3× longer to extract than 720p (more pixels per frame) |
+| Segment / clip count | More clips = more parallel extraction workers, but encoding stays serial |
+| `hardwareConcurrency` | Worker concurrency is capped at `Math.min(clips, hardwareConcurrency, 4)` |
+| OffscreenCanvas support | Chrome/Edge 94+ run extraction in parallel workers; older browsers fall back to sequential single-threaded extraction |
+| ffmpeg.wasm init | First call pays a ~1–2s WASM load cost; subsequent calls on the same instance are fast |
+
+### Benchmarks
+
+These are ballpark figures on a quiet tab with no other heavy work running. Real numbers vary with source bitrate, codec, and device thermals.
+
+| Scenario | Desktop (modern) | Mobile (mid-range) |
+|----------|------------------|--------------------|
+| 3 × 10s clips, 720p | ~4–6s | ~10–15s |
+| 3 × 10s clips, 1080p | ~10–14s | ~25–35s |
+| 10 × 5s clips, 720p | ~10–14s | ~28–40s |
+| 10 × 5s clips, 1080p | ~22–30s | ~55–75s |
+| 1 × 30s clip, 720p | ~5–8s | ~14–20s |
+
+**Extraction is parallel** — one Web Worker per clip/segment, capped at `Math.min(clips, hardwareConcurrency, 4)`. **Encoding is serial** — ffmpeg.wasm is a singleton and cannot run concurrent encode jobs in the same page.
+
+### Reading metrics at runtime
+
+Both `exportClips()` and `mergeClips()` return `{ blob, metrics }`. Use `onComplete` to log a breakdown without waiting on the returned promise:
+
+```ts
+import { exportClips } from 'framewebworker';
+
+const { blob, metrics } = await exportClips(videoUrl, segments, {
+  onComplete: (m) => {
+    console.log(`Total: ${(m.totalMs / 1000).toFixed(2)}s`);
+    console.log(`Throughput: ${m.framesPerSecond.toFixed(1)} fps`);
+    console.log(`Extraction: ${m.extractionMs.toFixed(0)}ms  Encoding: ${m.encodingMs.toFixed(0)}ms  Concat: ${m.stitchMs.toFixed(0)}ms`);
+
+    m.clips.forEach((c) => {
+      console.log(
+        `  segment ${c.clipId}: ${c.framesExtracted} frames, ` +
+        `extract ${c.extractionMs.toFixed(0)}ms, encode ${c.encodingMs.toFixed(0)}ms`
+      );
+    });
+  },
+});
+```
+
+See [`RenderMetrics`](#rendermetrics--timing-output) for the full type definition.
+
+### Tips to improve performance
+
+- **Prefer 720p source** when export quality allows — extraction cost scales with pixel count, so halving resolution cuts extraction time by ~4×.
+- **Keep segments short** — encoding time scales linearly with frame count. Ten 5s clips encode faster than two 25s clips, and extraction of the ten clips runs in parallel.
+- **Expect 2–3× slower on mobile** — `hardwareConcurrency` is typically 4–8 on desktop but 2–4 on phones, so fewer workers run in parallel and each core is slower.
+- **Reuse a `FrameWorker` instance** (for `mergeClips`) — the ffmpeg.wasm binary only loads once per instance. Creating a new instance per call pays the ~1–2s init cost every time.
+
+---
+
 ## `exportClips()` — One video, multiple time segments
 
 Use this when you're exporting multiple time ranges from the **same source file**.
