@@ -63,7 +63,7 @@ export function useMergeClips(frameWorker: FrameWorker): UseMergeClipsResult {
       setState({ progress: INITIAL_PROGRESS, isRendering: true, error: null, blob: null, url: null, metrics: null });
 
       try {
-        const { blob, metrics } = await frameWorker.mergeClips(clips, {
+        const { blob } = await frameWorker.mergeClips(clips, {
           ...options,
           signal: controller.signal,
           onProgress: (p) => setState((prev) => ({ ...prev, progress: p })),

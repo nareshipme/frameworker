@@ -75,9 +75,11 @@
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@types/react": "^18.0.0",
+    "eslint": "^10.2.0",
     "happy-dom": "^20.8.9",
     "tsup": "^8.0.0",
     "typescript": "^5.4.0",
+    "typescript-eslint": "^8.58.0",
     "vitest": "^1.6.0"
   }
 }
