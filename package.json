@@ -16,13 +16,13 @@
     "canvas",
     "typescript"
   ],
-  "homepage": "https://github.com/nareshipme/frameworker#readme",
+  "homepage": "https://github.com/nareshipme/framewebworker#readme",
   "bugs": {
-    "url": "https://github.com/nareshipme/frameworker/issues"
+    "url": "https://github.com/nareshipme/framewebworker/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/nareshipme/frameworker.git"
+    "url": "git+https://github.com/nareshipme/framewebworker.git"
   },
   "license": "MIT",
   "author": "nareshipme",

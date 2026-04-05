@@ -3,7 +3,7 @@
 **Browser-native video rendering and clip export.** Trim, caption, and export MP4 Blobs entirely in the browser — no server, no upload, no backend.
 
 [![npm](https://img.shields.io/npm/v/framewebworker)](https://www.npmjs.com/package/framewebworker)
-[![CI](https://github.com/nareshipme/frameworker/actions/workflows/ci.yml/badge.svg)](https://github.com/nareshipme/frameworker/actions)
+[![CI](https://github.com/nareshipme/framewebworker/actions/workflows/ci.yml/badge.svg)](https://github.com/nareshipme/framewebworker/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ## Features
