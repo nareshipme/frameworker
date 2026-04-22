@@ -35,6 +35,7 @@ export type {
 
 export { STYLE_PRESETS } from './captions.js';
 export { FFmpegBackend, createFFmpegBackend } from './backends/ffmpeg.js';
+export { WebCodecsBackend, createWebCodecsBackend, isWebCodecsSupported } from './backends/webcodecs.js';
 
 // v0.2 top-level API
 export { exportClips, exportClipsToUrl } from './render.js';
@@ -60,8 +61,13 @@ export function createFrameWorker(config: FrameWorkerConfig = {}): FrameWorker {
 
   async function getBackend(): Promise<RendererBackend> {
     if (!_backend) {
-      const { createFFmpegBackend } = await import('./backends/ffmpeg.js');
-      _backend = createFFmpegBackend();
+      const { isWebCodecsSupported, createWebCodecsBackend } = await import('./backends/webcodecs.js');
+      if (isWebCodecsSupported()) {
+        _backend = createWebCodecsBackend();
+      } else {
+        const { createFFmpegBackend } = await import('./backends/ffmpeg.js');
+        _backend = createFFmpegBackend();
+      }
     }
     await _backend.init();
     return _backend;
