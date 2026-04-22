@@ -180,6 +180,12 @@ export type StitchOptions = MergeOptions;
 export interface ExportOptions extends Omit<MergeOptions, 'onProgress' | 'onComplete'> {
   onProgress?: (progress: RichProgress) => void;
   onComplete?: (metrics: RenderMetrics) => void;
+  /**
+   * Override the renderer backend used by exportClips().
+   * Defaults to WebCodecsBackend (hardware-accelerated) with automatic
+   * fallback to FFmpegBackend for browsers that don't support WebCodecs.
+   */
+  backend?: RendererBackend;
 }
 
 /** @deprecated Use ExportOptions */

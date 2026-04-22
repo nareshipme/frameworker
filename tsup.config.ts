@@ -11,7 +11,7 @@ export default defineConfig([
     clean: true,
     splitting: false,
     treeshake: true,
-    external: ['@ffmpeg/ffmpeg', '@ffmpeg/util', 'react', 'react-dom'],
+    external: ['@ffmpeg/ffmpeg', '@ffmpeg/util', 'mp4-muxer', 'react', 'react-dom'],
     esbuildOptions(options) {
       options.conditions = ['browser'];
     },
@@ -27,7 +27,7 @@ export default defineConfig([
     sourcemap: true,
     splitting: false,
     treeshake: true,
-    external: ['@ffmpeg/ffmpeg', '@ffmpeg/util', 'react', 'react-dom'],
+    external: ['@ffmpeg/ffmpeg', '@ffmpeg/util', 'mp4-muxer', 'react', 'react-dom'],
     esbuildOptions(options) {
       options.conditions = ['browser'];
     },

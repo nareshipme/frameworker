@@ -13,7 +13,8 @@
 - **Overlay captions** with built-in style presets (`hormozi`, `modern`, `minimal`, `bold`)
 - **Parallel rendering** via OffscreenCanvas + Web Workers — automatic on supported browsers
 - **Timing metrics** — per-segment extraction/encoding times, overall FPS throughput
-- **Pluggable renderer backend** (default: ffmpeg.wasm)
+- **WebCodecs by default** — hardware-accelerated H.264 encoding with automatic fallback to ffmpeg.wasm
+- **Pluggable renderer backend** — swap encoders via `ExportOptions.backend`
 - **Framework-agnostic core** + React hooks (`framewebworker/react`)
 - **TypeScript-first** with full type exports
 - Respects `AbortSignal` for cancellation
@@ -21,10 +22,16 @@
 ## Install
 
 ```bash
-npm install framewebworker @ffmpeg/ffmpeg @ffmpeg/util
+npm install framewebworker
 ```
 
-> `@ffmpeg/ffmpeg` and `@ffmpeg/util` are optional peer dependencies required only by the default ffmpeg.wasm backend.
+The default backend uses the browser's native **WebCodecs API** (Chrome/Edge 94+) and requires no extra packages. For multi-clip concat or as a fallback on browsers without WebCodecs, `@ffmpeg/ffmpeg` is used automatically — install it if you need those code paths:
+
+```bash
+npm install @ffmpeg/ffmpeg @ffmpeg/util
+```
+
+> `@ffmpeg/ffmpeg` and `@ffmpeg/util` are optional peer dependencies. `mp4-muxer` is a direct dependency bundled automatically.
 
 ---
 
@@ -55,17 +62,16 @@ Both produce a single concatenated MP4 `Blob` and return `RenderMetrics`.
 
 ### Benchmarks
 
-These are ballpark figures on a quiet tab with no other heavy work running. Real numbers vary with source bitrate, codec, and device thermals.
+These are ballpark figures on a quiet tab with no other heavy work running. Real numbers vary with source bitrate, codec, and device thermals. **v0.3+ uses WebCodecs by default** — encoding is hardware-accelerated and 10–50× faster than the previous ffmpeg.wasm default.
 
-| Scenario | Desktop (modern) | Mobile (mid-range) |
-|----------|------------------|--------------------|
-| 3 × 10s clips, 720p | ~4–6s | ~10–15s |
-| 3 × 10s clips, 1080p | ~10–14s | ~25–35s |
-| 10 × 5s clips, 720p | ~10–14s | ~28–40s |
-| 10 × 5s clips, 1080p | ~22–30s | ~55–75s |
-| 1 × 30s clip, 720p | ~5–8s | ~14–20s |
+| Scenario | Desktop (WebCodecs) | Desktop (ffmpeg fallback) | Mobile (WebCodecs) |
+|----------|---------------------|---------------------------|--------------------|
+| 3 × 10s clips, 720p | ~0.5–1s | ~4–6s | ~1–3s |
+| 3 × 10s clips, 1080p | ~1–2s | ~10–14s | ~3–6s |
+| 10 × 5s clips, 720p | ~1–2s | ~10–14s | ~3–6s |
+| 1 × 30s clip, 720p | ~0.5–1s | ~5–8s | ~1–3s |
 
-**Extraction is parallel** — one Web Worker per clip/segment, capped at `Math.min(clips, hardwareConcurrency, 4)`. **Encoding is serial** — ffmpeg.wasm is a singleton and cannot run concurrent encode jobs in the same page.
+**Extraction is parallel** — one Web Worker per clip/segment, capped at `Math.min(clips, hardwareConcurrency, 4)`. **Encoding** uses hardware-accelerated WebCodecs where available; the ffmpeg.wasm fallback encodes serially.
 
 ### Reading metrics at runtime
 
@@ -97,7 +103,7 @@ See [`RenderMetrics`](#rendermetrics--timing-output) for the full type definitio
 - **Prefer 720p source** when export quality allows — extraction cost scales with pixel count, so halving resolution cuts extraction time by ~4×.
 - **Keep segments short** — encoding time scales linearly with frame count. Ten 5s clips encode faster than two 25s clips, and extraction of the ten clips runs in parallel.
 - **Expect 2–3× slower on mobile** — `hardwareConcurrency` is typically 4–8 on desktop but 2–4 on phones, so fewer workers run in parallel and each core is slower.
-- **Reuse a `FrameWorker` instance** (for `mergeClips`) — the ffmpeg.wasm binary only loads once per instance. Creating a new instance per call pays the ~1–2s init cost every time.
+- **Reuse a `FrameWorker` instance** (for `mergeClips`) — the WebCodecs backend is stateless, but reusing avoids re-running codec detection. If ffmpeg.wasm is active, it only loads once per instance.
 
 ---
 
@@ -394,6 +400,7 @@ Both have identical fields:
 | `signal` | `AbortSignal` | — | Cancellation signal |
 | `onProgress` | `(p: RichProgress) => void` | — | Called on every frame batch |
 | `onComplete` | `(m: RenderMetrics) => void` | — | Called once when the final blob is ready |
+| `backend` | `RendererBackend` | WebCodecs → ffmpeg | Override the encoder backend (`ExportOptions` only) |
 
 `RichProgress` shape:
 
@@ -442,7 +449,7 @@ captions: {
 import { createFrameWorker } from 'framewebworker';
 
 const fw = createFrameWorker({
-  backend: myBackend, // optional, defaults to ffmpeg.wasm
+  backend: myBackend, // optional, defaults to WebCodecsBackend with ffmpeg fallback
   fps: 30,
   width: 1280,
   height: 720,
@@ -497,6 +504,36 @@ const fw = createFrameWorker({ backend: myBackend });
 
 ---
 
+## Migration from v0.2
+
+### Default backend changed
+
+`exportClips()` and `createFrameWorker()` now use **WebCodecsBackend** by default instead of FFmpegBackend. This is transparent for most users — the API is unchanged. If you need to opt back to ffmpeg.wasm explicitly:
+
+```ts
+import { exportClips, FFmpegBackend } from 'framewebworker';
+
+const { blob } = await exportClips(videoUrl, segments, {
+  backend: new FFmpegBackend(),
+});
+```
+
+### `isWebCodecsSupported()` helper
+
+```ts
+import { isWebCodecsSupported } from 'framewebworker';
+
+if (!isWebCodecsSupported()) {
+  console.warn('WebCodecs unavailable — ffmpeg.wasm fallback will be used');
+}
+```
+
+### Install change
+
+`mp4-muxer` is now a direct dependency (bundled). `@ffmpeg/ffmpeg` is no longer needed for Chrome/Edge users but remains an optional peer dep for the ffmpeg fallback.
+
+---
+
 ## Migration from v0.1
 
 | v0.1 | v0.2 | Notes |
@@ -512,20 +549,28 @@ const fw = createFrameWorker({ backend: myBackend });
 | `SingleVideoRenderOptions` | `ExportOptions` | Deprecated type alias kept |
 | `ClipInput` | `ClipSource` | Deprecated type alias kept |
 
-All v0.1 names emit a `@deprecated` JSDoc warning in editors but continue to work. They will be removed in v0.3.
+All v0.1 names emit a `@deprecated` JSDoc warning in editors but continue to work. They will be removed in a future major version.
 
 ---
 
 ## Browser Requirements
 
-- Chrome/Edge 94+ or Firefox 90+ (OffscreenCanvas, Web Workers, WASM)
-- COOP/COEP headers required for ffmpeg.wasm SharedArrayBuffer:
-  ```
-  Cross-Origin-Opener-Policy: same-origin
-  Cross-Origin-Embedder-Policy: require-corp
-  ```
+| Feature | Chrome/Edge | Firefox | Safari |
+|---------|-------------|---------|--------|
+| WebCodecs (default encoder) | 94+ | ✗ (uses ffmpeg fallback) | 16.4+ |
+| OffscreenCanvas (parallel extraction) | 94+ | 105+ | 16.4+ |
+| ffmpeg.wasm fallback | ✓ | ✓ | ✓ |
 
-Browsers without `OffscreenCanvas` or `Worker` support fall back to sequential single-threaded rendering automatically.
+**COOP/COEP headers are only required when ffmpeg.wasm is active** (Firefox, or when you explicitly pass `FFmpegBackend`):
+
+```
+Cross-Origin-Opener-Policy: same-origin
+Cross-Origin-Embedder-Policy: require-corp
+```
+
+On Chrome/Edge with the default WebCodecs path, no special headers are needed.
+
+Browsers without `OffscreenCanvas` or `Worker` support fall back to sequential single-threaded frame extraction automatically.
 
 ---
 
