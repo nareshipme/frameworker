@@ -1,7 +1,4 @@
-// ── Type exports ─────────────────────────────────────────────────────────────
-
 export type {
-  // Core
   ClipSource,
   CaptionSegment,
   CaptionStyle,
@@ -10,89 +7,51 @@ export type {
   CropOptions,
   CaptionOptions,
   RenderOptions,
-  EncodeOptions,
-  FrameData,
-  RendererBackend,
   FrameWorkerConfig,
   FrameWorker,
-  // Progress & metrics
   ClipStatus,
   ClipProgress,
   RichProgress,
   ClipMetrics,
   RenderMetrics,
-  // v0.2 API options
   MergeOptions,
   ExportOptions,
   Segment,
-  // Deprecated aliases (kept for soft migration)
   ClipInput,
   StitchOptions,
   SingleVideoRenderOptions,
+  EncodeOptions,
+  FrameData,
+  RendererBackend,
 } from './types.js';
 
-// ── Value exports ─────────────────────────────────────────────────────────────
-
 export { STYLE_PRESETS } from './captions.js';
-export { FFmpegBackend, createFFmpegBackend } from './backends/ffmpeg.js';
-export { WebCodecsBackend, createWebCodecsBackend, isWebCodecsSupported } from './backends/webcodecs.js';
+export { isCanvasRecordingSupported } from './backends/canvas.js';
 
-// v0.2 top-level API
 export { exportClips, exportClipsToUrl } from './render.js';
 
-// Deprecated aliases (soft migration — will be removed in v0.3)
 /** @deprecated Use exportClips() */
 export { render } from './render.js';
 /** @deprecated Use exportClipsToUrl() */
 export { renderToUrl } from './render.js';
 
-// ── createFrameWorker ─────────────────────────────────────────────────────────
+import type { ClipSource, RenderOptions, MergeOptions, RenderMetrics, FrameWorkerConfig, FrameWorker } from './types.js';
+import { recordClip, recordClips } from './backends/canvas.js';
 
-import type { ClipSource, RenderOptions, MergeOptions, RenderMetrics, FrameWorkerConfig, FrameWorker, RendererBackend } from './types.js';
-import { extractFrames } from './compositor.js';
-import { stitchClips } from './stitch.js';
+function resolveUrl(clip: ClipSource): { url: string; needsRevoke: boolean } {
+  if (typeof clip.source === 'string') return { url: clip.source, needsRevoke: false };
+  if (clip.source instanceof HTMLVideoElement) return { url: clip.source.src, needsRevoke: false };
+  return { url: URL.createObjectURL(clip.source as Blob), needsRevoke: true };
+}
 
-export function createFrameWorker(config: FrameWorkerConfig = {}): FrameWorker {
-  const fps = config.fps ?? 30;
-  const width = config.width ?? 1280;
-  const height = config.height ?? 720;
-
-  let _backend: RendererBackend | null = config.backend ?? null;
-
-  async function getBackend(): Promise<RendererBackend> {
-    if (!_backend) {
-      const { isWebCodecsSupported, createWebCodecsBackend } = await import('./backends/webcodecs.js');
-      if (isWebCodecsSupported()) {
-        _backend = createWebCodecsBackend();
-      } else {
-        const { createFFmpegBackend } = await import('./backends/ffmpeg.js');
-        _backend = createFFmpegBackend();
-      }
-    }
-    await _backend.init();
-    return _backend;
-  }
-
+export function createFrameWorker(_config: FrameWorkerConfig = {}): FrameWorker {
   async function render(clip: ClipSource, options: RenderOptions = {}): Promise<Blob> {
-    const mergedOpts: RenderOptions = { fps, width, height, ...options };
-    const backend = await getBackend();
-
-    const onProgress = mergedOpts.onProgress;
-    const frames = await extractFrames(clip, {
-      ...mergedOpts,
-      onProgress: onProgress ? (p) => onProgress(p * 0.85) : undefined,
-    });
-
-    return backend.encode(frames, {
-      width: mergedOpts.width ?? width,
-      height: mergedOpts.height ?? height,
-      fps: mergedOpts.fps ?? fps,
-      mimeType: mergedOpts.mimeType ?? 'video/mp4',
-      quality: mergedOpts.quality ?? 0.92,
-      encoderOptions: mergedOpts.encoderOptions,
-      onProgress: onProgress ? (p) => onProgress(0.85 + p * 0.15) : undefined,
-      signal: mergedOpts.signal,
-    });
+    const { url, needsRevoke } = resolveUrl(clip);
+    try {
+      return await recordClip(url, clip, { signal: options.signal, onProgress: options.onProgress });
+    } finally {
+      if (needsRevoke) URL.revokeObjectURL(url);
+    }
   }
 
   async function renderToUrl(clip: ClipSource, options?: RenderOptions): Promise<string> {
@@ -101,9 +60,7 @@ export function createFrameWorker(config: FrameWorkerConfig = {}): FrameWorker {
   }
 
   async function mergeClips(clips: ClipSource[], options: MergeOptions = {}): Promise<{ blob: Blob; metrics: RenderMetrics }> {
-    const mergedOpts: MergeOptions = { fps, width, height, ...options };
-    const backend = await getBackend();
-    return stitchClips(clips, backend, mergedOpts);
+    return recordClips(clips, options);
   }
 
   async function mergeClipsToUrl(clips: ClipSource[], options?: MergeOptions): Promise<{ url: string; metrics: RenderMetrics }> {

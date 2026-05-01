@@ -87,47 +87,25 @@ export interface RenderOptions {
   signal?: AbortSignal;
 }
 
+/** @deprecated No longer used — canvas is the only backend */
 export interface EncodeOptions {
-  width: number;
-  height: number;
-  fps: number;
-  mimeType: string;
-  quality: number;
-  encoderOptions?: Record<string, unknown>;
-  onProgress?: (progress: number) => void;
-  signal?: AbortSignal;
+  width: number; height: number; fps: number; mimeType: string; quality: number;
+  encoderOptions?: Record<string, unknown>; onProgress?: (progress: number) => void; signal?: AbortSignal;
 }
 
+/** @deprecated No longer used — canvas is the only backend */
 export interface FrameData {
-  imageData: ImageData;
-  timestamp: number; // seconds
-  width: number;
-  height: number;
+  imageData: ImageData; timestamp: number; width: number; height: number;
 }
 
-/** Pluggable renderer backend interface */
+/** @deprecated No longer used — canvas is the only backend */
 export interface RendererBackend {
-  /** Human-readable backend name */
-  name: string;
-  /** Initialize the backend (load WASM, etc.) */
-  init(): Promise<void>;
-  /** Encode an array of frames into a video Blob */
-  encode(frames: FrameData[], options: EncodeOptions): Promise<Blob>;
-  /** Concatenate multiple video Blobs */
-  concat(blobs: Blob[], options: EncodeOptions): Promise<Blob>;
-  /** Optional cleanup */
-  destroy?(): Promise<void>;
+  name: string; init(): Promise<void>; encode(frames: FrameData[], options: EncodeOptions): Promise<Blob>;
+  concat(blobs: Blob[], options: EncodeOptions): Promise<Blob>; destroy?(): Promise<void>;
 }
 
 export interface FrameWorkerConfig {
-  /** Renderer backend (default: ffmpeg.wasm) */
-  backend?: RendererBackend;
-  /** Default FPS (default: 30) */
-  fps?: number;
-  /** Default output width */
-  width?: number;
-  /** Default output height */
-  height?: number;
+  fps?: number; width?: number; height?: number;
 }
 
 export interface ClipMetrics {
@@ -180,12 +158,6 @@ export type StitchOptions = MergeOptions;
 export interface ExportOptions extends Omit<MergeOptions, 'onProgress' | 'onComplete'> {
   onProgress?: (progress: RichProgress) => void;
   onComplete?: (metrics: RenderMetrics) => void;
-  /**
-   * Override the renderer backend used by exportClips().
-   * Defaults to WebCodecsBackend (hardware-accelerated) with automatic
-   * fallback to FFmpegBackend for browsers that don't support WebCodecs.
-   */
-  backend?: RendererBackend;
 }
 
 /** @deprecated Use ExportOptions */

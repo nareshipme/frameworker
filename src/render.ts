@@ -1,5 +1,5 @@
-import type { Segment, ExportOptions, RenderMetrics, ClipSource, RendererBackend } from './types.js';
-import { stitchClips } from './stitch.js';
+import type { Segment, ExportOptions, RenderMetrics, ClipSource } from './types.js';
+import { recordClips } from './backends/canvas.js';
 
 function segmentsToClips(videoUrl: string, segments: Segment[]): ClipSource[] {
   return segments.map((seg) => ({
@@ -10,35 +10,13 @@ function segmentsToClips(videoUrl: string, segments: Segment[]): ClipSource[] {
   }));
 }
 
-async function resolveBackend(override?: RendererBackend): Promise<RendererBackend> {
-  if (override) {
-    await override.init();
-    return override;
-  }
-
-  // Default: WebCodecs (hardware-accelerated, no CDN deps).
-  // Falls back to FFmpegBackend for browsers without WebCodecs support.
-  const { isWebCodecsSupported, createWebCodecsBackend } = await import('./backends/webcodecs.js');
-  if (isWebCodecsSupported()) {
-    const backend = createWebCodecsBackend();
-    await backend.init();
-    return backend;
-  }
-
-  const { createFFmpegBackend } = await import('./backends/ffmpeg.js');
-  const backend = createFFmpegBackend();
-  await backend.init();
-  return backend;
-}
-
 export async function exportClips(
   videoUrl: string,
   segments: Segment[],
   options?: ExportOptions
 ): Promise<{ blob: Blob; metrics: RenderMetrics }> {
   const clips = segmentsToClips(videoUrl, segments);
-  const backend = await resolveBackend(options?.backend);
-  return stitchClips(clips, backend, options ?? {});
+  return recordClips(clips, options ?? {});
 }
 
 export async function exportClipsToUrl(
