@@ -1,12 +1,13 @@
 import type { Segment, ExportOptions, RenderMetrics, ClipSource } from './types.js';
 import { recordClips } from './backends/canvas.js';
 
-function segmentsToClips(videoUrl: string, segments: Segment[]): ClipSource[] {
+function segmentsToClips(videoUrl: string, segments: Segment[], options?: ExportOptions): ClipSource[] {
   return segments.map((seg) => ({
     source: videoUrl,
     startTime: seg.start,
     endTime: seg.end,
     captions: seg.captions?.length ? { segments: seg.captions } : undefined,
+    quality: options?.quality,
   }));
 }
 
@@ -15,7 +16,7 @@ export async function exportClips(
   segments: Segment[],
   options?: ExportOptions
 ): Promise<{ blob: Blob; metrics: RenderMetrics }> {
-  const clips = segmentsToClips(videoUrl, segments);
+  const clips = segmentsToClips(videoUrl, segments, options);
   return recordClips(clips, options ?? {});
 }
 

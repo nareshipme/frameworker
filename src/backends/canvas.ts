@@ -30,11 +30,22 @@ interface Layout {
   srcH: number;
 }
 
+const MEDIUM_MAX_SHORT_SIDE = 720;
+
 function computeLayout(clip: ClipSource, videoW: number, videoH: number): Layout {
   const ar = clip.aspectRatio ?? 'original';
   const ratio = ASPECT_RATIO_MAP[ar] ?? [0, 0];
-  const canvasW = ratio[0] === 0 ? videoW : 1280;
-  const canvasH = ratio[0] === 0 ? videoH : Math.round(canvasW * (ratio[1] / ratio[0]));
+  let canvasW = ratio[0] === 0 ? videoW : 1280;
+  let canvasH = ratio[0] === 0 ? videoH : Math.round(canvasW * (ratio[1] / ratio[0]));
+
+  if (clip.quality === 'medium') {
+    const shortSide = Math.min(canvasW, canvasH);
+    if (shortSide > MEDIUM_MAX_SHORT_SIDE) {
+      const scale = MEDIUM_MAX_SHORT_SIDE / shortSide;
+      canvasW = Math.round(canvasW * scale);
+      canvasH = Math.round(canvasH * scale);
+    }
+  }
 
   if (clip.crop) {
     const { x, y, width, height } = clip.crop;
@@ -141,7 +152,9 @@ export async function recordClip(
     }
 
     const mimeType = pickMimeType();
-    const recorder = new MediaRecorder(canvasStream, { mimeType });
+    const recorderInit: MediaRecorderInit = { mimeType };
+    if (clip.quality === 'medium') recorderInit.videoBitsPerSecond = 2_500_000;
+    const recorder = new MediaRecorder(canvasStream, recorderInit);
     const chunks: Blob[] = [];
     recorder.ondataavailable = (e) => {
       if (e.data.size > 0) chunks.push(e.data);
