@@ -35,6 +35,13 @@ export interface CaptionStyle {
 
 export type AspectRatio = '16:9' | '9:16' | '1:1' | '4:3' | '3:4' | 'original';
 
+/**
+ * Output quality preset.
+ * - `'medium'`   — scales output to 720p (max 720px short-side) at 2.5 Mbps; good for social media / phone screens.
+ * - `'original'` — native video resolution at browser-default bitrate (default).
+ */
+export type QualityPreset = 'medium' | 'original';
+
 export interface CropOptions {
   x: number; // 0-1
   y: number; // 0-1
@@ -63,6 +70,8 @@ export interface ClipSource {
   aspectRatio?: AspectRatio;
   /** Volume multiplier 0-2 (default: 1) */
   volume?: number;
+  /** Output quality preset (default: 'original') */
+  quality?: QualityPreset;
 }
 
 /** @deprecated Use ClipSource */
@@ -146,7 +155,9 @@ export interface RichProgress {
 }
 
 /** Options for mergeClips() / FrameWorker.mergeClips() */
-export interface MergeOptions extends Omit<RenderOptions, 'onProgress'> {
+export interface MergeOptions extends Omit<RenderOptions, 'onProgress' | 'quality'> {
+  /** Output quality preset applied to all clips (default: 'original') */
+  quality?: QualityPreset;
   onProgress?: (progress: RichProgress) => void;
   onComplete?: (metrics: RenderMetrics) => void;
 }

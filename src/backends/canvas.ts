@@ -30,11 +30,22 @@ interface Layout {
   srcH: number;
 }
 
+const MEDIUM_MAX_SHORT_SIDE = 720;
+
 function computeLayout(clip: ClipSource, videoW: number, videoH: number): Layout {
   const ar = clip.aspectRatio ?? 'original';
   const ratio = ASPECT_RATIO_MAP[ar] ?? [0, 0];
-  const canvasW = ratio[0] === 0 ? videoW : 1280;
-  const canvasH = ratio[0] === 0 ? videoH : Math.round(canvasW * (ratio[1] / ratio[0]));
+  let canvasW = ratio[0] === 0 ? videoW : 1280;
+  let canvasH = ratio[0] === 0 ? videoH : Math.round(canvasW * (ratio[1] / ratio[0]));
+
+  if (clip.quality === 'medium') {
+    const shortSide = Math.min(canvasW, canvasH);
+    if (shortSide > MEDIUM_MAX_SHORT_SIDE) {
+      const scale = MEDIUM_MAX_SHORT_SIDE / shortSide;
+      canvasW = Math.round(canvasW * scale);
+      canvasH = Math.round(canvasH * scale);
+    }
+  }
 
   if (clip.crop) {
     const { x, y, width, height } = clip.crop;
@@ -95,11 +106,15 @@ export async function recordClip(
 
   try {
     await new Promise<void>((resolve, reject) => {
-      video.addEventListener('loadedmetadata', () => resolve(), { once: true });
+      // canplaythrough = browser has buffered enough to play without stalling.
+      // This prevents the video from pausing mid-record on remote/S3 sources.
+      video.addEventListener('canplaythrough', () => resolve(), { once: true });
       video.addEventListener('error', () => reject(new Error(`Failed to load video: ${srcUrl}`)), {
         once: true,
       });
+      video.preload = 'auto';
       video.src = srcUrl;
+      video.load();
     });
 
     const startTime = clip.startTime ?? 0;
@@ -137,7 +152,9 @@ export async function recordClip(
     }
 
     const mimeType = pickMimeType();
-    const recorder = new MediaRecorder(canvasStream, { mimeType });
+    const recorderInit: MediaRecorderOptions = { mimeType };
+    if (clip.quality === 'medium') recorderInit.videoBitsPerSecond = 2_500_000;
+    const recorder = new MediaRecorder(canvasStream, recorderInit);
     const chunks: Blob[] = [];
     recorder.ondataavailable = (e) => {
       if (e.data.size > 0) chunks.push(e.data);
@@ -149,14 +166,34 @@ export async function recordClip(
       clip.captions?.style
     );
 
+    // requestVideoFrameCallback fires per decoded frame and is NOT throttled in
+    // background tabs, unlike requestAnimationFrame.
+    const supportsRVFC = 'requestVideoFrameCallback' in video;
+
     return await new Promise<Blob>((resolve, reject) => {
-      let rafId = 0;
+      let frameHandle = 0;
       // eslint-disable-next-line prefer-const
       let intervalId: ReturnType<typeof setInterval>;
       let aborted = false;
 
+      function scheduleFrame() {
+        if (supportsRVFC) {
+          frameHandle = (video as any).requestVideoFrameCallback(drawFrame);
+        } else {
+          frameHandle = requestAnimationFrame(drawFrame);
+        }
+      }
+
+      function cancelFrame() {
+        if (supportsRVFC) {
+          (video as any).cancelVideoFrameCallback(frameHandle);
+        } else {
+          cancelAnimationFrame(frameHandle);
+        }
+      }
+
       function stop() {
-        cancelAnimationFrame(rafId);
+        cancelFrame();
         clearInterval(intervalId);
         if (recorder.state !== 'inactive') recorder.stop();
         video.pause();
@@ -169,7 +206,7 @@ export async function recordClip(
           renderCaption(ctx, seg, mergeStyle(baseStyle, seg.style), canvasW, canvasH);
         }
         if (video.currentTime < endTime) {
-          rafId = requestAnimationFrame(drawFrame);
+          scheduleFrame();
         } else {
           stop();
         }
@@ -182,9 +219,8 @@ export async function recordClip(
 
       recorder.start(100);
       video.play().catch(reject);
-      rafId = requestAnimationFrame(drawFrame);
+      scheduleFrame();
 
-      const startWall = Date.now();
       intervalId = setInterval(() => {
         if (signal?.aborted) {
           aborted = true;
@@ -192,8 +228,7 @@ export async function recordClip(
           reject(new DOMException('Render cancelled', 'AbortError'));
           return;
         }
-        const elapsed = (Date.now() - startWall) / 1000;
-        onProgress?.(Math.min(elapsed / duration, 0.99));
+        onProgress?.(Math.min((video.currentTime - startTime) / duration, 0.99));
       }, 200);
 
       video.addEventListener('ended', stop, { once: true });
