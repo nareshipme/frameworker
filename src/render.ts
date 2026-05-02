@@ -8,6 +8,7 @@ function segmentsToClips(videoUrl: string, segments: Segment[], options?: Export
     endTime: seg.end,
     captions: seg.captions?.length ? { segments: seg.captions } : undefined,
     quality: options?.quality,
+    aspectRatio: options?.aspectRatio,
   }));
 }
 
