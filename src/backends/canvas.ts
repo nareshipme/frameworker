@@ -102,7 +102,9 @@ export async function recordClip(
   video.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px';
   document.body.appendChild(video);
 
+  // Create AudioContext immediately (close to the user gesture) so resume() succeeds later.
   let audioCtx: AudioContext | null = null;
+  try { audioCtx = new AudioContext(); } catch { /* not supported */ }
 
   try {
     await new Promise<void>((resolve, reject) => {
@@ -137,18 +139,23 @@ export async function recordClip(
 
     const canvasStream = canvas.captureStream(30);
 
-    try {
-      audioCtx = new AudioContext();
-      if (audioCtx.state === 'suspended') await audioCtx.resume();
-      const audioSrc = audioCtx.createMediaElementSource(video);
-      const audioDest = audioCtx.createMediaStreamDestination();
-      const gain = audioCtx.createGain();
-      gain.gain.value = clip.volume ?? 1;
-      audioSrc.connect(gain);
-      gain.connect(audioDest);
-      audioDest.stream.getAudioTracks().forEach((t) => canvasStream.addTrack(t));
-    } catch {
-      // no audio track or CORS restriction — continue video-only
+    // Unmute so audio data flows through the Web Audio graph (some browsers silence
+    // createMediaElementSource output when the element's muted flag is true).
+    video.muted = false;
+
+    if (audioCtx) {
+      try {
+        if (audioCtx.state === 'suspended') await audioCtx.resume();
+        const audioSrc = audioCtx.createMediaElementSource(video);
+        const audioDest = audioCtx.createMediaStreamDestination();
+        const gain = audioCtx.createGain();
+        gain.gain.value = clip.volume ?? 1;
+        audioSrc.connect(gain);
+        gain.connect(audioDest);
+        audioDest.stream.getAudioTracks().forEach((t) => canvasStream.addTrack(t));
+      } catch {
+        // CORS restriction or other error — continue video-only
+      }
     }
 
     const mimeType = pickMimeType();
@@ -178,7 +185,7 @@ export async function recordClip(
 
       function scheduleFrame() {
         if (supportsRVFC) {
-          frameHandle = (video as any).requestVideoFrameCallback(drawFrame);
+          frameHandle = (video as HTMLVideoElement & { requestVideoFrameCallback(cb: () => void): number }).requestVideoFrameCallback(drawFrame);
         } else {
           frameHandle = requestAnimationFrame(drawFrame);
         }
@@ -186,7 +193,7 @@ export async function recordClip(
 
       function cancelFrame() {
         if (supportsRVFC) {
-          (video as any).cancelVideoFrameCallback(frameHandle);
+          (video as HTMLVideoElement & { cancelVideoFrameCallback(id: number): void }).cancelVideoFrameCallback(frameHandle);
         } else {
           cancelAnimationFrame(frameHandle);
         }
@@ -218,7 +225,11 @@ export async function recordClip(
       recorder.onerror = () => reject(new Error('Recording failed'));
 
       recorder.start(100);
-      video.play().catch(reject);
+      // Try unmuted play; if autoplay policy blocks it, fall back to muted play
+      video.play().catch(() => {
+        video.muted = true;
+        video.play().catch(reject);
+      });
       scheduleFrame();
 
       intervalId = setInterval(() => {

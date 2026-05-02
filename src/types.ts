@@ -158,6 +158,8 @@ export interface RichProgress {
 export interface MergeOptions extends Omit<RenderOptions, 'onProgress' | 'quality'> {
   /** Output quality preset applied to all clips (default: 'original') */
   quality?: QualityPreset;
+  /** Output aspect ratio applied to all segments when using exportClips() (default: 'original') */
+  aspectRatio?: AspectRatio;
   onProgress?: (progress: RichProgress) => void;
   onComplete?: (metrics: RenderMetrics) => void;
 }
