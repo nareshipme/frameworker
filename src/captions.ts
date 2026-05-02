@@ -169,7 +169,9 @@ export function renderCaption(
   } else if (style.position === 'center') {
     baseY = canvasHeight / 2 - totalH / 2 + lineH;
   } else {
-    baseY = canvasHeight - scaledFontSize * 1.2;
+    // Anchor the LAST line at the bottom margin so multi-line captions don't overflow.
+    baseY = canvasHeight - scaledFontSize * 1.2 - (lines.length - 1) * lineH;
+    if (baseY < lineH) baseY = lineH; // clamp: don't let first line go above canvas
   }
 
   const cx = canvasWidth / 2;
